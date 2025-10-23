@@ -41,6 +41,8 @@ func (s *chitChatServer) broadcast(msg *pb.MessageLog) {
 			continue
 		}
 
+		incrementClock(msg)
+
 		//We create a goroutine to send the actual message to each stream.
 		//The goroutine is to ensure we don't have to wait for each client to receive the message,
 		//before we can send a message to the next person.
@@ -87,7 +89,9 @@ func (s *chitChatServer) SendMessage(stream pb.ChitChat_SendMessageServer) error
 		}
 
 		//We increment our clock for the sending of a new message.
+		mu.Lock()
 		incrementClock(msg)
+		mu.Unlock()
 
 		// If HasJoined is false, it is the receival of our dummy message,
 		//Which infers it is a new client that has joined
@@ -123,15 +127,13 @@ func (s *chitChatServer) SendMessage(stream pb.ChitChat_SendMessageServer) error
 	}
 }
 
-//Helper function to increment our clock on the server and the message to be sent.
+// Helper function to increment our clock on the server and the message to be sent.
 func incrementClock(msg *pb.MessageLog) {
-	mu.Lock()
 	clock = max(clock, msg.Timestamp) + 1
 	msg.Timestamp = clock
-	mu.Unlock()
 }
 
-//Helper function to find max of 2 integers.
+// Helper function to find max of 2 integers.
 func max(a, b int32) int32 {
 	if a > b {
 		return a
