@@ -3,22 +3,20 @@
 // they use to communicate.
 
 syntax = "proto3";
-package chitchat;
+package grpc;
 
 option go_package = "disys_chitchat_activity03/proto";
 
+//Our ChitChat Service. Contains only one rpc method, which receives and sends a stream of messages.
 service ChitChat {
   rpc SendMessage(stream MessageLog) returns (stream MessageLog) {}
 }
 
+//Our message, containing necessary information.
 message MessageLog {
   int32 timestamp = 1;
   string componentName = 2;
   string eventType = 3;
   string clientName = 4;
-}
-
-message Client {
-  int32 logicalTime = 1;
-  string clientName = 2;
+  bool hasJoined = 5;
 }
