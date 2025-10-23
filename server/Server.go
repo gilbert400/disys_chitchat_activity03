@@ -43,14 +43,17 @@ func (s *chitChatServer) broadcast(msg *pb.MessageLog) {
 
 		incrementClock(msg)
 
+		newMsg := *msg // shallow copy to avoid pointer mutation race
+		newMsg.Timestamp = clock
+
 		//We create a goroutine to send the actual message to each stream.
 		//The goroutine is to ensure we don't have to wait for each client to receive the message,
 		//before we can send a message to the next person.
-		go func(name string, stream pb.ChitChat_SendMessageServer) {
-			if err := stream.Send(msg); err != nil {
+		go func(name string, stream pb.ChitChat_SendMessageServer, m pb.MessageLog) {
+			if err := stream.Send(&m); err != nil {
 				log.Printf("Error sending to %s: %v", name, err)
 			}
-		}(name, clientStream)
+		}(name, clientStream, newMsg)
 	}
 }
 
