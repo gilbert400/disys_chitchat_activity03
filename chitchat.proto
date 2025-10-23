@@ -1,0 +1,24 @@
+//This file acts as a contract between the client and server,
+// describing both the structure of the data and the remote procedure calls (RPCs)
+// they use to communicate.
+
+syntax = "proto3";
+package chitchat;
+
+option go_package = "disys_chitchat_activity03/proto";
+
+service ChitChat {
+  rpc SendMessage(stream MessageLog) returns (stream MessageLog) {}
+}
+
+message MessageLog {
+  int32 timestamp = 1;
+  string componentName = 2;
+  string eventType = 3;
+  string clientName = 4;
+}
+
+message Client {
+  int32 logicalTime = 1;
+  string clientName = 2;
+}
