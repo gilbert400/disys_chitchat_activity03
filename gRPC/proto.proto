@@ -8,7 +8,7 @@ package chitchat;
 option go_package = "disys_chitchat_activity03/grpc/proto";
 
 service ChitChat{
-  rpc GetMessages(MessageRequest) returns (stream MessagesList)
+  rpc GetMessages(MessageRequest) returns (stream MessagesList){}
   rpc SendMessage(Message) returns (MessageLog) {}
 }
 message MessageRequest {}
