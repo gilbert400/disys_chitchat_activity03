@@ -96,7 +96,7 @@ func Enter() {
 			c := pb.NewRicartAgrawalaClient(conn)
 
 			mu.Lock()
-			ts := clock // send current Lamport time
+			ts := clock
 			mu.Unlock()
 
 			_, _ = c.Receive(ctx, &pb.Request{
