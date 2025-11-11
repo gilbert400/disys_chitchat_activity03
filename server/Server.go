@@ -1,142 +1,41 @@
 package main
 
 import (
-	"bufio"
+	"context"
 	pb "disys_chitchat_activity03/grpc"
+	"flag"
 	"fmt"
 	"log"
+	"math/rand"
 	"net"
-	"os"
-	"strings"
 	"sync"
+	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
-// Our clock
-var clock int32
+type STATE int
 
-// A Mutex we use when incrementing the clock, to ensure safe threading.
-var mu sync.Mutex
+const (
+	RELEASED STATE = iota
+	WANTED
+	HELD
+)
 
-// our chitChatServer struct implementing our protobuffer server.
-// Also contains a map that maps the username to the active chat stream of each user.
-type chitChatServer struct {
-	pb.UnimplementedChitChatServer
-	clients map[string]pb.ChitChat_SendMessageServer
-}
+var (
+	id      int
+	state   = RELEASED
+	clock   int32
+	myReqTS int32
 
-// Broadcast function, that broadcasts a message to every user
-func (s *chitChatServer) broadcast(msg *pb.MessageLog) {
-	//We lock so we always broadcast messages in the same order for every user.
-	//So no other messages can be broadcast and create problems.
-	mu.Lock()
-	defer mu.Unlock()
+	mu   sync.Mutex
+	cond = sync.NewCond(&mu)
 
-	//We loop through the name and the stream of our saved clients.
-	for name, clientStream := range s.clients {
-		//We do not broadcast the message if it is the message of the person who sent it,
-		//As it is displayed on the clients console to start with.
-		if name == msg.ClientName {
-			continue
-		}
+	peers    []string
+	basePort = 8000
+)
 
-		incrementClock(msg)
-
-		newMsg := *msg // shallow copy to avoid pointer mutation race
-		newMsg.Timestamp = clock
-
-		//We create a goroutine to send the actual message to each stream.
-		//The goroutine is to ensure we don't have to wait for each client to receive the message,
-		//before we can send a message to the next person.
-		go func(name string, stream pb.ChitChat_SendMessageServer, m pb.MessageLog) {
-			if err := stream.Send(&m); err != nil {
-				log.Printf("Error sending to %s: %v", name, err)
-			}
-		}(name, clientStream, newMsg)
-	}
-}
-
-// Our actual protocolbuffer implementation, that takes in a stream.
-func (s *chitChatServer) SendMessage(stream pb.ChitChat_SendMessageServer) error {
-	//Holds clientName of the stream
-	var clientName string
-
-	//A While true loop that loops forever as long as the stream is active.
-	for {
-		//Retrieves message from stream (if any)
-		msg, err := stream.Recv()
-
-		//If we return an error, we can assume the client has disconnected
-		if err != nil {
-			if clientName != "" {
-				mu.Lock()
-				//Here we increment our clock for leaving.
-				clock++
-				//We remove the person from our map of clients.
-				delete(s.clients, clientName)
-				mu.Unlock()
-
-				//We create a new leave message, and broadcast the message to our users, aswell as the servers console.
-				leaveText := fmt.Sprintf("participant %s left Chit Chat at logical time %d", clientName, clock)
-				leaveMsg := &pb.MessageLog{
-					Timestamp:     clock,
-					ComponentName: "Server",
-					EventType:     leaveText,
-					ClientName:    "Server",
-				}
-				s.broadcast(leaveMsg)
-				log.Printf("[Server @ %d] %s", clock, leaveText)
-			}
-			return nil
-		}
-
-		//We increment our clock for the sending of a new message.
-		mu.Lock()
-		incrementClock(msg)
-		mu.Unlock()
-
-		// If HasJoined is false, it is the receival of our dummy message,
-		//Which infers it is a new client that has joined
-		if msg.HasJoined == false {
-			//We set the clientName of our string. Used to remove the client on disconnect.
-			clientName = msg.ClientName
-			mu.Lock()
-			//We add the client and stream to our map.
-			s.clients[clientName] = stream
-			mu.Unlock()
-
-			//We create and broadcast a join message to all clients aswell as our servers console.
-			joinText := fmt.Sprintf("Participant %s joined Chit Chat at logical time %d", clientName, clock)
-
-			joinMsg := &pb.MessageLog{
-				Timestamp:     clock,
-				ComponentName: "Server",
-				EventType:     joinText,
-				ClientName:    "Server",
-				HasJoined:     true,
-			}
-
-			log.Printf("[Server @ %d] %s", clock, joinText)
-
-			s.broadcast(joinMsg)
-		} else {
-
-			//If hasJoined is true, then it is the receival of a message from a user, and not a newly joined user.
-			log.Printf("[%s @ %d] %s: %s", msg.ComponentName, msg.Timestamp, msg.ClientName, msg.EventType)
-			s.broadcast(msg)
-		}
-
-	}
-}
-
-// Helper function to increment our clock on the server and the message to be sent.
-func incrementClock(msg *pb.MessageLog) {
-	clock = max(clock, msg.Timestamp) + 1
-	msg.Timestamp = clock
-}
-
-// Helper function to find max of 2 integers.
 func max(a, b int32) int32 {
 	if a > b {
 		return a
@@ -144,46 +43,138 @@ func max(a, b int32) int32 {
 	return b
 }
 
-func main() {
-	//We create our listener to open new connection.
-	//We choose TCP has it is more reliable, and don't expect to use big amounts of bandwidth
-	lis, err := net.Listen("tcp", ":50051")
-	if err != nil {
-		log.Fatalf("Failed to listen: %v", err)
+type RicartAgrawalaServer struct {
+	pb.UnimplementedRicartAgrawalaServer
+}
+
+func (s *RicartAgrawalaServer) Receive(ctx context.Context, req *pb.Request) (*pb.Reply, error) {
+	mu.Lock()
+	clock = max(clock, req.Timestamp) + 1
+
+	for state == HELD || (state == WANTED && myReqTS < req.Timestamp) {
+		done := make(chan struct{})
+		go func() { <-ctx.Done(); close(done) }()
+		cond.Wait()
+
+		select {
+		case <-done:
+			mu.Unlock()
+			return nil, ctx.Err()
+		default:
+		}
 	}
 
-	//We create our new grpc server and register it to our struct.
-	//We also create our clients map object.
-	grpcServer := grpc.NewServer()
-	pb.RegisterChitChatServer(grpcServer, &chitChatServer{
-		clients: make(map[string]pb.ChitChat_SendMessageServer),
-	})
+	clock++
+	mu.Unlock()
+	fmt.Printf("I AM REPLYING TO PORT %d", basePort+int(req.SenderId))
+	return &pb.Reply{}, nil
+}
 
-	//We create a goroutine to listen to the "server admin" wanting to close the server.
-	reader := bufio.NewReader(os.Stdin)
+func Enter() {
+	mu.Lock()
+	clock++
+	myReqTS = clock
+	fmt.Println("STATE IS WANTED")
+	state = WANTED
+	mu.Unlock()
+
+	var wg sync.WaitGroup
+	fmt.Println("I AM ASKING ALL PEERS")
+	for _, addr := range peers {
+		addr := addr
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+
+			conn, _ := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+
+			defer conn.Close()
+
+			c := pb.NewRicartAgrawalaClient(conn)
+
+			mu.Lock()
+			ts := clock // send current Lamport time
+			mu.Unlock()
+
+			_, _ = c.Receive(ctx, &pb.Request{
+				SenderId:  int32(id),
+				Timestamp: ts,
+			})
+
+		}()
+	}
+
+	wg.Wait()
+
+	mu.Lock()
+	fmt.Println("STATE IS HELD - IN THE CRITICAL SECTION")
+	state = HELD
+	mu.Unlock()
+}
+
+func Exit() {
+	mu.Lock()
+	clock++
+	fmt.Println("STATE IS RELEASED")
+	state = RELEASED
+	mu.Unlock()
+	cond.Broadcast()
+}
+
+func loadPeers(selfID, num int) (selfAddr string, peers []string) {
+	selfAddr = fmt.Sprintf("localhost:%d", basePort+selfID)
+	for i := 0; i < num; i++ {
+		if i == selfID {
+			continue
+		}
+
+		peers = append(peers, fmt.Sprintf("localhost:%d", basePort+i))
+	}
+	return
+}
+
+func main() {
+	var (
+		flagID = flag.Int("id", 0, "this node id (0..n-1)")
+		flagN  = flag.Int("n", 1, "number of nodes")
+	)
+	flag.Parse()
+
+	if *flagN <= 0 || *flagID < 0 || *flagID >= *flagN {
+		log.Fatalf("bad flags: id=%d n=%d", *flagID, *flagN)
+	}
+
+	id = *flagID
+	selfAddr, p := loadPeers(id, *flagN)
+	peers = p
+
+	grpcServer := grpc.NewServer()
+	pb.RegisterRicartAgrawalaServer(grpcServer, &RicartAgrawalaServer{})
+
+	lis, err := net.Listen("tcp", selfAddr)
+	if err != nil {
+		log.Fatalf("listen %s: %v", selfAddr, err)
+	}
+
+	log.Printf("[node %d] listening on %s; peers=%v", id, selfAddr, peers)
+
 	go func() {
-		for {
-			text, _ := reader.ReadString('\n')
-			text = strings.TrimSpace(text)
-			if text == "exit" {
-				mu.Lock()
-				clock++
-				mu.Unlock()
-				log.Printf("[Server @ %d] Closing server...", clock)
-				grpcServer.Stop()
-				break
-			}
+		if err := grpcServer.Serve(lis); err != nil {
+			log.Fatalf("grpc serve: %v", err)
 		}
 	}()
 
-	//We increment our clock for starting the server.
-	mu.Lock()
-	clock++
-	mu.Unlock()
+	rand.Seed(time.Now().UnixNano())
+	for {
+		time.Sleep(time.Duration(400+rand.Intn(600)) * time.Millisecond)
 
-	//We server our listener to our grpc server and actually start the server.
-	log.Println("ChitChat server started on port :50051\nWrite 'Exit' to stop server...")
-	if err := grpcServer.Serve(lis); err != nil {
-		log.Fatalf("Failed to serve: %v", err)
+		Enter()
+
+		time.Sleep(time.Duration(300+rand.Intn(500)) * time.Millisecond)
+
+		Exit()
 	}
 }

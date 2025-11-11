@@ -8,15 +8,15 @@ package grpc;
 option go_package = "disys_chitchat_activity03/proto";
 
 //Our ChitChat Service. Contains only one rpc method, which receives and sends a stream of messages.
-service ChitChat {
-  rpc SendMessage(stream MessageLog) returns (stream MessageLog) {}
+service RicartAgrawala {
+  rpc Receive(Request) returns (Reply) {}
 }
 
 //Our message, containing necessary information.
-message MessageLog {
+message Request {
   int32 timestamp = 1;
-  string componentName = 2;
-  string eventType = 3;
-  string clientName = 4;
-  bool hasJoined = 5;
+  int32 sender_id = 2;
+}
+
+message Reply {
 }
