@@ -90,7 +90,7 @@ func (s *RicartAgrawalaServer) Receive(ctx context.Context, req *pb.Request) (*p
 	//or the Exit function has been called. We therefor reply to the node.
 	clock++
 	mu.Unlock()
-	fmt.Printf("I AM REPLYING TO PORT %d", basePort+int(req.SenderId))
+	fmt.Printf("I AM REPLYING TO PORT %d\n", basePort+int(req.SenderId))
 	return &pb.Reply{}, nil
 }
 
@@ -230,11 +230,11 @@ func main() {
 	// Endless loop that simulates random critical section requests
 	rand.Seed(time.Now().UnixNano())
 	for {
-		time.Sleep(time.Duration(400+rand.Intn(500)) * time.Millisecond) // Sleep for random time
+		time.Sleep(time.Duration(1000+rand.Intn(1500)) * time.Millisecond) // Sleep for random time
 
 		Enter() // Try to enter critical section
 
-		time.Sleep(time.Duration(300+rand.Intn(500)) * time.Millisecond) // Critical section for some time
+		time.Sleep(time.Duration(1000+rand.Intn(1500)) * time.Millisecond) // Critical section for some time
 
 		Exit() // Leave critical section after some time
 	}
