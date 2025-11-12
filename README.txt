@@ -1,13 +1,14 @@
 To run the program with 3 clients follow these steps.
 
-1. run the following command in the terminal:
-	go run -id=0 -n=3
+
+1. Go into the server folder and run the following command in the terminal:
+	go run . id=0 -n=3
 
 2. open a new terminal and run:
-	go run -id=1 -n=3
+	go run . -id=1 -n=3
 
 3. open a third terminal and run:
-	go run -id=2 -n=3
+	go run . -id=2 -n=3
 
 
 If you need more than 3 nodes change the n to the number of nodes wanted,
